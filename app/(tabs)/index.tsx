@@ -48,6 +48,29 @@ type NumericPictureSize = {
     value: string;
 };
 
+const SHAKE_FORCE_MIN = 1.05;
+const SHAKE_FORCE_MID = 2.2;
+const SHAKE_FORCE_MAX = 5.0;
+
+function getShakeForceThreshold(percent: number) {
+    const clampedPercent =
+        Math.max(0, Math.min(100, percent));
+
+    if (clampedPercent <= 50) {
+        return (
+            SHAKE_FORCE_MIN +
+            (clampedPercent / 50) *
+                (SHAKE_FORCE_MID - SHAKE_FORCE_MIN)
+        );
+    }
+
+    return (
+        SHAKE_FORCE_MID +
+        ((clampedPercent - 50) / 50) *
+            (SHAKE_FORCE_MAX - SHAKE_FORCE_MID)
+    );
+}
+
 function selectPictureSize(
     availableSizes: string[],
     resolution: PhotoResolution
@@ -501,8 +524,13 @@ export default function CameraPage() {
                     const now =
                         Date.now();
 
+                    const shakeThreshold =
+                        getShakeForceThreshold(
+                            settings.shakeThresholdPercent
+                        );
+
                     if (
-                        force > 2.2 &&
+                        force > shakeThreshold &&
                         now - lastShakeTime > 1000
                     ) {
                         lastShakeTime = now;
@@ -521,6 +549,7 @@ export default function CameraPage() {
         isCameraReady,
         isFocused,
         isHydrated,
+        settings.shakeThresholdPercent,
         startShakeCountdown,
     ]);
 

@@ -162,6 +162,12 @@ export default function HomeScreen() {
         changeRecorderPhase("starting");
 
         try {
+            setRecordingUri(null);
+
+            await new Promise(resolve =>
+                setTimeout(resolve, 100)
+            );
+
             await setAudioModeAsync({
                 playsInSilentMode: true,
                 allowsRecording: true,
@@ -172,10 +178,6 @@ export default function HomeScreen() {
             if (!isFocusedRef.current) {
                 recorder.record();
                 await recorder.stop();
-                await setAudioModeAsync({
-                    playsInSilentMode: true,
-                    allowsRecording: false,
-                });
                 changeRecorderPhase("idle");
 
                 return;
@@ -212,18 +214,6 @@ export default function HomeScreen() {
 
                 if (uri) {
                     setRecordingUri(uri);
-                }
-
-                try {
-                    await setAudioModeAsync({
-                        playsInSilentMode: true,
-                        allowsRecording: false,
-                    });
-                } catch (audioModeError) {
-                    console.warn(
-                        "Unable to reset audio mode:",
-                        audioModeError
-                    );
                 }
 
                 changeRecorderPhase("idle");
@@ -432,14 +422,17 @@ function RecordingPlayer({
     useEffect(() => {
         isFocusedRef.current = isFocused;
 
-        if (!isFocused) {
-            player.pause();
+        if (!isFocused && playerStatus.playing) {
+            try {
+                player.pause();
+            } catch (error) {
+                console.warn(
+                    "Unable to pause recording playback:",
+                    error
+                );
+            }
         }
-
-        return () => {
-            player.pause();
-        };
-    }, [isFocused, player]);
+    }, [isFocused, player, playerStatus.playing]);
 
     async function togglePlayback() {
         try {
@@ -467,7 +460,16 @@ function RecordingPlayer({
     }
 
     function clearRecording() {
-        player.pause();
+        if (playerStatus.playing) {
+            try {
+                player.pause();
+            } catch (error) {
+                console.warn(
+                    "Unable to pause recording playback:",
+                    error
+                );
+            }
+        }
 
         onClear();
     }

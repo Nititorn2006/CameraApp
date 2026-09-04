@@ -14,6 +14,7 @@ export type AudioQuality = "low" | "medium" | "high";
 
 export type AppSettings = {
   countdownSeconds: number;
+  shakeThresholdPercent: number;
   photoResolution: PhotoResolution;
   audioQuality: AudioQuality;
 };
@@ -28,6 +29,7 @@ const STORAGE_KEY = "@camera-app/settings";
 
 const DEFAULT_SETTINGS: AppSettings = {
   countdownSeconds: 3,
+  shakeThresholdPercent: 50,
   photoResolution: "high",
   audioQuality: "high",
 };
@@ -40,6 +42,7 @@ function getStoredSettings(value: unknown): AppSettings {
   }
 
   const stored = value as Partial<AppSettings>;
+
   const countdownSeconds =
     typeof stored.countdownSeconds === "number" &&
     Number.isInteger(stored.countdownSeconds) &&
@@ -47,12 +50,22 @@ function getStoredSettings(value: unknown): AppSettings {
     stored.countdownSeconds <= 10
       ? stored.countdownSeconds
       : DEFAULT_SETTINGS.countdownSeconds;
+
+  const shakeThresholdPercent =
+    typeof stored.shakeThresholdPercent === "number" &&
+    Number.isInteger(stored.shakeThresholdPercent) &&
+    stored.shakeThresholdPercent >= 0 &&
+    stored.shakeThresholdPercent <= 100
+      ? stored.shakeThresholdPercent
+      : DEFAULT_SETTINGS.shakeThresholdPercent;
+
   const photoResolution =
     stored.photoResolution === "low" ||
     stored.photoResolution === "medium" ||
     stored.photoResolution === "high"
       ? stored.photoResolution
       : DEFAULT_SETTINGS.photoResolution;
+
   const audioQuality =
     stored.audioQuality === "low" ||
     stored.audioQuality === "medium" ||
@@ -62,6 +75,7 @@ function getStoredSettings(value: unknown): AppSettings {
 
   return {
     countdownSeconds,
+    shakeThresholdPercent,
     photoResolution,
     audioQuality,
   };
@@ -112,6 +126,8 @@ export function SettingsProvider({ children }: PropsWithChildren) {
 
     if (
       nextSettings.countdownSeconds === settingsRef.current.countdownSeconds &&
+      nextSettings.shakeThresholdPercent ===
+        settingsRef.current.shakeThresholdPercent &&
       nextSettings.photoResolution === settingsRef.current.photoResolution &&
       nextSettings.audioQuality === settingsRef.current.audioQuality
     ) {

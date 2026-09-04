@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useState } from "react";
 
 import {
   type AudioQuality,
@@ -17,8 +18,71 @@ import {
   useSettings,
 } from "@/contexts/settings-context";
 
+type SettingDropdownProps<T extends string> = {
+  value: T;
+  options: T[];
+  labels: Record<T, string>;
+  onValueChange: (value: T) => void;
+};
+
+function SettingDropdown<T extends string>({
+    value,
+    options,
+    labels,
+    onValueChange,
+}: SettingDropdownProps<T>) {
+    const [isOpen, setIsOpen] = useState(false);
+
+    const otherOptions =
+        options.filter(option => option !== value);
+
+    return (
+        <View style={styles.dropdownContainer}>
+            <Pressable
+                style={styles.dropdownButton}
+                onPress={() => setIsOpen(current => !current)}
+            >
+                <Text style={styles.dropdownButtonText}>
+                    {labels[value]}
+                </Text>
+
+                <MaterialIcons
+                    name={
+                        isOpen
+                            ? "keyboard-arrow-up"
+                            : "keyboard-arrow-down"
+                    }
+                    size={28}
+                    color="white"
+                />
+            </Pressable>
+
+            {isOpen && (
+                <View style={styles.dropdownMenu}>
+                    {otherOptions.map(option => (
+                        <Pressable
+                            key={option}
+                            style={styles.dropdownItem}
+                            onPress={() => {
+                                onValueChange(option);
+                                setIsOpen(false);
+                            }}
+                        >
+                            <Text style={styles.dropdownItemText}>
+                                {labels[option]}
+                            </Text>
+                        </Pressable>
+                    ))}
+                </View>
+            )}
+        </View>
+    );
+}
+
 const COUNTDOWN_MIN = 3;
 const COUNTDOWN_MAX = 10;
+const SHAKE_THRESHOLD_MIN = 0;
+const SHAKE_THRESHOLD_MAX = 100;
 const PHOTO_LEVELS: PhotoResolution[] = ["low", "medium", "high"];
 const AUDIO_LEVELS: AudioQuality[] = ["low", "medium", "high"];
 
@@ -161,50 +225,54 @@ export default function SettingsScreen() {
           valueLabel={`${settings.countdownSeconds} sec`}
         />
 
-        <Text style={styles.groupLabel}>PHOTO RESOLUTION</Text>
+        <Text style={styles.groupLabel}>SHAKE THRESHOLD</Text>
         <SettingSlider
-          accessibilityLabel="Photo resolution"
-          description="Drag to choose photo detail and file size"
-          maximumLabel="High"
-          maximumValue={PHOTO_LEVELS.length - 1}
-          minimumLabel="Low"
-          minimumValue={0}
-          onValueChange={(value) => {
-            const resolution = PHOTO_LEVELS[Math.round(value)];
-
-            if (resolution) {
-              updateSettings({ photoResolution: resolution });
-            }
-          }}
-          title="Resolution"
-          value={PHOTO_LEVELS.indexOf(settings.photoResolution)}
-          valueLabel={LEVEL_LABELS[settings.photoResolution]}
+          accessibilityLabel="Shake threshold percentage"
+          description="How hard the phone must be shaken before countdown starts"
+          maximumLabel="100%"
+          maximumValue={SHAKE_THRESHOLD_MAX}
+          minimumLabel="0%"
+          minimumValue={SHAKE_THRESHOLD_MIN}
+          onValueChange={(value) =>
+            updateSettings({ shakeThresholdPercent: Math.round(value) })
+          }
+          title="Shake Threshold"
+          value={settings.shakeThresholdPercent}
+          valueLabel={`${settings.shakeThresholdPercent}%`}
         />
 
+        <Text style={styles.groupLabel}>PHOTO RESOLUTION</Text>
+
+        <SettingDropdown
+          value={settings.photoResolution}
+          options={PHOTO_LEVELS}
+          labels={LEVEL_LABELS}
+          onValueChange={(resolution) => {
+          updateSettings({
+          photoResolution: resolution,
+            });
+          }}
+        />
         <View style={[styles.sectionHeading, styles.voiceSectionHeading]}>
           <MaterialIcons color="#A8A8AD" name="mic" size={20} />
           <Text style={styles.sectionTitle}>Voice Recorder</Text>
         </View>
 
-        <Text style={styles.groupLabel}>AUDIO QUALITY</Text>
-        <SettingSlider
-          accessibilityLabel="Audio recording quality"
-          description="Drag to balance voice clarity and file size"
-          maximumLabel="High"
-          maximumValue={AUDIO_LEVELS.length - 1}
-          minimumLabel="Low"
-          minimumValue={0}
-          onValueChange={(value) => {
-            const quality = AUDIO_LEVELS[Math.round(value)];
+        <Text style={styles.groupLabel}>
+    AUDIO QUALITY
+</Text>
 
-            if (quality) {
-              updateSettings({ audioQuality: quality });
-            }
-          }}
-          title="Recording quality"
-          value={AUDIO_LEVELS.indexOf(settings.audioQuality)}
-          valueLabel={LEVEL_LABELS[settings.audioQuality]}
-        />
+<SettingDropdown
+    value={settings.audioQuality}
+    options={AUDIO_LEVELS}
+    labels={LEVEL_LABELS}
+    onValueChange={(quality) => {
+        updateSettings({
+            audioQuality: quality,
+        });
+    }}
+/>
+
       </ScrollView>
     </SafeAreaView>
   );
@@ -343,4 +411,47 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "600",
   },
+  dropdownContainer: {
+    marginBottom: 20,
+},
+
+dropdownButton: {
+    alignItems: "center",
+    backgroundColor: "#18181B",
+    borderColor: "#444",
+    borderRadius: 12,
+    borderWidth: 1,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    minHeight: 56,
+    paddingHorizontal: 18,
+},
+
+dropdownButtonText: {
+    color: "#FFFFFF",
+    fontSize: 17,
+    fontWeight: "600",
+},
+
+dropdownMenu: {
+    backgroundColor: "#18181B",
+    borderColor: "#444",
+    borderRadius: 12,
+    borderWidth: 1,
+    marginTop: 6,
+    overflow: "hidden",
+},
+
+dropdownItem: {
+    borderBottomColor: "#333",
+    borderBottomWidth: 1,
+    justifyContent: "center",
+    minHeight: 54,
+    paddingHorizontal: 18,
+},
+
+dropdownItemText: {
+    color: "#FFFFFF",
+    fontSize: 17,
+},
 });
