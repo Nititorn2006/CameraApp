@@ -5,6 +5,8 @@ import {
     StyleSheet,
     Alert,
     Animated,
+    AppState,
+    type AppStateStatus,
 } from "react-native";
 
 import {
@@ -18,9 +20,14 @@ import type {
 
 import * as MediaLibrary from "expo-media-library";
 
+import { router } from "expo-router";
+import { useIsFocused } from "@react-navigation/native";
+
 import {
     Accelerometer,
 } from "expo-sensors";
+
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
     useCallback,
@@ -29,9 +36,104 @@ import {
     useState,
 } from "react";
 
+import { SettingsButton } from "@/components/settings-button";
+import {
+    type PhotoResolution,
+    useSettings,
+} from "@/contexts/settings-context";
+
+type NumericPictureSize = {
+    pixels: number;
+    ratio: number;
+    value: string;
+};
+
+function selectPictureSize(
+    availableSizes: string[],
+    resolution: PhotoResolution
+) {
+    const symbolicSizes: Record<PhotoResolution, string[]> = {
+        low: ["Low"],
+        medium: ["Medium"],
+        high: ["Photo", "High"],
+    };
+
+    const symbolicMatch =
+        symbolicSizes[resolution].find(size =>
+            availableSizes.includes(size)
+        );
+
+    if (symbolicMatch) {
+        return symbolicMatch;
+    }
+
+    const numericSizes =
+        availableSizes
+            .map((value): NumericPictureSize | null => {
+                const match = /^(\d+)x(\d+)$/.exec(value);
+
+                if (!match) {
+                    return null;
+                }
+
+                const width = Number(match[1]);
+                const height = Number(match[2]);
+
+                return {
+                    pixels: width * height,
+                    ratio: Math.max(width, height) /
+                        Math.min(width, height),
+                    value,
+                };
+            })
+            .filter(
+                (size): size is NumericPictureSize =>
+                    size !== null
+            );
+
+    const fourByThreeSizes =
+        numericSizes.filter(size =>
+            Math.abs(size.ratio - 4 / 3) < 0.03
+        );
+    const candidates =
+        fourByThreeSizes.length >= 3
+            ? fourByThreeSizes
+            : numericSizes;
+
+    candidates.sort((first, second) =>
+        first.pixels - second.pixels
+    );
+
+    if (candidates.length === 0) {
+        return undefined;
+    }
+
+    const index =
+        resolution === "low"
+            ? 0
+            : resolution === "medium"
+              ? Math.floor((candidates.length - 1) / 2)
+              : candidates.length - 1;
+
+    return candidates[index]?.value;
+}
+
 export default function CameraPage() {
+    const isFocused = useIsFocused();
+    const insets = useSafeAreaInsets();
+    const { isHydrated, settings } = useSettings();
+
     const cameraRef =
         useRef<CameraView>(null);
+
+    const cameraReadyRef =
+        useRef(false);
+
+    const isFocusedRef =
+        useRef(isFocused);
+
+    const appIsActiveRef =
+        useRef(AppState.currentState === "active");
 
     const takingPhotoRef =
         useRef(false);
@@ -42,6 +144,9 @@ export default function CameraPage() {
     const countdownTimerRef =
         useRef<ReturnType<typeof setInterval> | null>(null);
 
+    const pendingCaptureRef =
+        useRef(false);
+
     const flashOpacity =
         useRef(new Animated.Value(0)).current;
 
@@ -50,6 +155,15 @@ export default function CameraPage() {
 
     const [isTakingPhoto, setIsTakingPhoto] =
         useState(false);
+
+    const [isCameraReady, setIsCameraReady] =
+        useState(false);
+
+    const [availablePictureSizes, setAvailablePictureSizes] =
+        useState<string[]>([]);
+
+    const [appState, setAppState] =
+        useState<AppStateStatus>(AppState.currentState);
 
     const [countdown, setCountdown] =
         useState<number | null>(null);
@@ -67,6 +181,19 @@ export default function CameraPage() {
         granularPermissions: ["photo"],
     });
 
+    const selectedPictureSize =
+        selectPictureSize(
+            availablePictureSizes,
+            settings.photoResolution
+        );
+
+    const setCameraInstance =
+        useCallback((camera: CameraView | null) => {
+            cameraRef.current = camera;
+            cameraReadyRef.current = false;
+            setIsCameraReady(false);
+        }, []);
+
     const showCaptureAnimation =
         useCallback(() => {
             flashOpacity.stopAnimation();
@@ -83,11 +210,92 @@ export default function CameraPage() {
             ).start();
         }, [flashOpacity]);
 
+    const cancelCountdown =
+        useCallback(() => {
+            if (countdownTimerRef.current) {
+                clearInterval(
+                    countdownTimerRef.current
+                );
+
+                countdownTimerRef.current = null;
+            }
+
+            countdownActiveRef.current = false;
+            setCountdown(null);
+        }, []);
+
+    const handleCameraReady =
+        useCallback(async () => {
+            const camera = cameraRef.current;
+
+            if (
+                !camera ||
+                !isFocusedRef.current ||
+                !appIsActiveRef.current
+            ) {
+                return;
+            }
+
+            if (selectedPictureSize) {
+                cameraReadyRef.current = true;
+                setIsCameraReady(true);
+
+                return;
+            }
+
+            try {
+                const sizes =
+                    await camera.getAvailablePictureSizesAsync();
+
+                if (
+                    !isFocusedRef.current ||
+                    !appIsActiveRef.current ||
+                    cameraRef.current !== camera
+                ) {
+                    return;
+                }
+
+                const resolvedSize =
+                    selectPictureSize(
+                        sizes,
+                        settings.photoResolution
+                    );
+
+                if (resolvedSize) {
+                    setAvailablePictureSizes(sizes);
+
+                    return;
+                }
+
+                cameraReadyRef.current = true;
+                setIsCameraReady(true);
+            } catch (error) {
+                console.warn(
+                    "Unable to get picture sizes:",
+                    error
+                );
+
+                if (
+                    isFocusedRef.current &&
+                    appIsActiveRef.current &&
+                    cameraRef.current === camera
+                ) {
+                    cameraReadyRef.current = true;
+                    setIsCameraReady(true);
+                }
+            }
+        }, [selectedPictureSize, settings.photoResolution]);
+
     const takePhoto =
         useCallback(async () => {
+            const camera = cameraRef.current;
+
             if (
                 takingPhotoRef.current ||
-                !cameraRef.current
+                !camera ||
+                !cameraReadyRef.current ||
+                !isFocusedRef.current ||
+                !appIsActiveRef.current
             ) {
                 return;
             }
@@ -97,18 +305,33 @@ export default function CameraPage() {
 
             try {
                 if (!mediaPermission?.granted) {
+                    pendingCaptureRef.current = true;
+
                     const result =
                         await requestMediaPermission();
 
                     if (!result.granted) {
+                        pendingCaptureRef.current = false;
+
                         return;
                     }
+
+                    return;
+                }
+
+                if (
+                    !cameraReadyRef.current ||
+                    !isFocusedRef.current ||
+                    !appIsActiveRef.current ||
+                    cameraRef.current !== camera
+                ) {
+                    return;
                 }
 
                 showCaptureAnimation();
 
                 const photo =
-                    await cameraRef.current.takePictureAsync();
+                    await camera.takePictureAsync();
 
                 if (!photo) {
                     return;
@@ -124,6 +347,8 @@ export default function CameraPage() {
                 );
 
             } catch (error) {
+                pendingCaptureRef.current = false;
+
                 console.log(
                     "Take photo error:",
                     error
@@ -144,18 +369,42 @@ export default function CameraPage() {
             showCaptureAnimation,
         ]);
 
+    useEffect(() => {
+        if (
+            !pendingCaptureRef.current ||
+            !mediaPermission?.granted ||
+            !isCameraReady ||
+            !isFocused ||
+            appState !== "active"
+        ) {
+            return;
+        }
+
+        pendingCaptureRef.current = false;
+        void takePhoto();
+    }, [
+        appState,
+        isCameraReady,
+        isFocused,
+        mediaPermission?.granted,
+        takePhoto,
+    ]);
+
     const startShakeCountdown =
         useCallback(() => {
             if (
                 countdownActiveRef.current ||
-                takingPhotoRef.current
+                takingPhotoRef.current ||
+                !cameraReadyRef.current ||
+                !isFocusedRef.current ||
+                !appIsActiveRef.current
             ) {
                 return;
             }
 
             countdownActiveRef.current = true;
 
-            let current = 3;
+            let current = settings.countdownSeconds;
 
             setCountdown(current);
 
@@ -188,10 +437,50 @@ export default function CameraPage() {
                         }
                     })();
                 }, 1000);
-        }, [takePhoto]);
+        }, [settings.countdownSeconds, takePhoto]);
 
     useEffect(() => {
-        if (!cameraPermission?.granted) {
+        isFocusedRef.current = isFocused;
+
+        if (!isFocused) {
+            cameraReadyRef.current = false;
+            pendingCaptureRef.current = false;
+            cancelCountdown();
+        }
+    }, [cancelCountdown, isFocused]);
+
+    useEffect(() => {
+        const subscription =
+            AppState.addEventListener(
+                "change",
+                nextAppState => {
+                    const isActive =
+                        nextAppState === "active";
+
+                    appIsActiveRef.current = isActive;
+                    setAppState(nextAppState);
+
+                    if (!isActive) {
+                        cameraReadyRef.current = false;
+                        setIsCameraReady(false);
+                        cancelCountdown();
+                    }
+                }
+            );
+
+        return () => {
+            subscription.remove();
+        };
+    }, [cancelCountdown]);
+
+    useEffect(() => {
+        if (
+            !cameraPermission?.granted ||
+            !isCameraReady ||
+            !isFocused ||
+            !isHydrated ||
+            appState !== "active"
+        ) {
             return;
         }
 
@@ -228,18 +517,18 @@ export default function CameraPage() {
         };
     }, [
         cameraPermission?.granted,
+        appState,
+        isCameraReady,
+        isFocused,
+        isHydrated,
         startShakeCountdown,
     ]);
 
     useEffect(() => {
         return () => {
-            if (countdownTimerRef.current) {
-                clearInterval(
-                    countdownTimerRef.current
-                );
-            }
+            cancelCountdown();
         };
-    }, []);
+    }, [cancelCountdown]);
 
     const flipCamera = () => {
         if (
@@ -248,6 +537,10 @@ export default function CameraPage() {
         ) {
             return;
         }
+
+        cameraReadyRef.current = false;
+        setIsCameraReady(false);
+        setAvailablePictureSizes([]);
 
         setFacing(
             current =>
@@ -264,13 +557,23 @@ export default function CameraPage() {
     if (!cameraPermission.granted) {
         return (
             <View style={styles.permissionContainer}>
+                <SettingsButton
+                    disabled={!isHydrated}
+                    style={[
+                        styles.settingsButton,
+                        { top: insets.top + 10 },
+                    ]}
+                />
+
                 <Text style={styles.permissionText}>
                     Camera permission is required
                 </Text>
 
                 <Pressable
-                    style={styles.permissionButton}
+                    accessibilityLabel="Allow camera access"
+                    accessibilityRole="button"
                     onPress={requestCameraPermission}
+                    style={styles.permissionButton}
                 >
                     <Text style={styles.permissionButtonText}>
                         Allow Camera
@@ -282,15 +585,32 @@ export default function CameraPage() {
 
     const controlsDisabled =
         isTakingPhoto ||
-        countdown !== null;
+        countdown !== null ||
+        !isCameraReady ||
+        !isHydrated;
+
+    const cameraKey =
+        `${facing}:${selectedPictureSize ?? "detect"}`;
 
     return (
         <View style={styles.container}>
-            <CameraView
-                ref={cameraRef}
-                style={styles.camera}
-                facing={facing}
-            />
+            <View style={styles.topBlackBar} />
+
+            {isFocused && appState === "active" && (
+                <CameraView
+                    facing={facing}
+                    key={cameraKey}
+                    onCameraReady={handleCameraReady}
+                    pictureSize={selectedPictureSize}
+                    ratio={
+                        selectedPictureSize
+                            ? undefined
+                            : "4:3"
+                    }
+                    ref={setCameraInstance}
+                    style={styles.camera}
+                />
+            )}
 
             <Animated.View
                 pointerEvents="none"
@@ -301,6 +621,37 @@ export default function CameraPage() {
                     },
                 ]}
             />
+
+            <SettingsButton
+                disabled={
+                    !isHydrated ||
+                    isTakingPhoto ||
+                    countdown !== null
+                }
+                style={[
+                    styles.settingsButton,
+                    { top: insets.top + 10 },
+                ]}
+            />
+
+            <Pressable
+                accessibilityLabel="Open voice recorder"
+                accessibilityRole="button"
+                disabled={controlsDisabled}
+                onPress={() => {
+                    cancelCountdown();
+                    router.push("/(tabs)/voice_record");
+                }}
+                style={[
+                    styles.voiceButton,
+                    controlsDisabled &&
+                        styles.sideControlDisabled,
+                ]}
+            >
+                <Text style={styles.voiceButtonText}>
+                    Voice Recorder
+                </Text>
+            </Pressable>
 
             {countdown !== null && (
                 <View
@@ -313,17 +664,22 @@ export default function CameraPage() {
                 </View>
             )}
 
+            <View style={styles.bottomBlackBar} />
+
             <View style={styles.controls}>
                 <View style={styles.sideButton} />
 
                 <Pressable
+                    accessibilityLabel="Take photo"
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: controlsDisabled }}
+                    disabled={controlsDisabled}
+                    onPress={takePhoto}
                     style={[
                         styles.shutterOuter,
                         controlsDisabled &&
                             styles.shutterDisabled,
                     ]}
-                    onPress={takePhoto}
-                    disabled={controlsDisabled}
                 >
                     <View
                         style={styles.shutterInner}
@@ -331,9 +687,16 @@ export default function CameraPage() {
                 </Pressable>
 
                 <Pressable
-                    style={styles.sideButton}
-                    onPress={flipCamera}
+                    accessibilityLabel={
+                        facing === "back"
+                            ? "Switch to front camera"
+                            : "Switch to back camera"
+                    }
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: controlsDisabled }}
                     disabled={controlsDisabled}
+                    onPress={flipCamera}
+                    style={styles.sideButton}
                 >
                     <Text style={styles.flipText}>
                         ↻
@@ -378,6 +741,7 @@ const styles = StyleSheet.create({
         flexDirection: "row",
         justifyContent: "space-around",
         alignItems: "center",
+        zIndex: 3,
     },
 
     shutterOuter: {
@@ -401,6 +765,10 @@ const styles = StyleSheet.create({
         opacity: 0.5,
     },
 
+    sideControlDisabled: {
+        opacity: 0.4,
+    },
+
     sideButton: {
         width: 55,
         height: 55,
@@ -414,6 +782,7 @@ const styles = StyleSheet.create({
     },
 
     permissionContainer: {
+        backgroundColor: "black",
         flex: 1,
         justifyContent: "center",
         alignItems: "center",
@@ -421,6 +790,7 @@ const styles = StyleSheet.create({
     },
 
     permissionText: {
+        color: "white",
         fontSize: 16,
         marginBottom: 20,
     },
@@ -435,5 +805,50 @@ const styles = StyleSheet.create({
     permissionButtonText: {
         color: "white",
         fontSize: 16,
+    },
+
+    voiceButton: {
+        width: 60,
+        height: 60,
+        borderRadius: 30,
+        backgroundColor: "rgba(0, 0, 0, 0.5)",
+        alignItems: "center",
+        justifyContent: "center",
+        position: "absolute",
+        bottom: 52,
+        left: 35,
+        zIndex: 4,
+    },
+
+    voiceButtonText: {
+        color: "#FF4248",
+        fontSize: 12,
+        fontWeight: "bold",
+    },
+
+    topBlackBar: {
+        position: "absolute",
+        top: 0,
+        left: 0,
+        right: 0,
+        height: 120,
+        backgroundColor: "black",
+        zIndex: 2,
+    },
+
+    settingsButton: {
+        position: "absolute",
+        right: 18,
+        zIndex: 6,
+    },
+
+    bottomBlackBar: {
+        position: "absolute",
+        bottom: 0,
+        left: 0,
+        right: 0,
+        height: 190,
+        backgroundColor: "black",
+        zIndex: 2,
     },
 });
