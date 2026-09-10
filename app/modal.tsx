@@ -83,7 +83,6 @@ const COUNTDOWN_MIN = 3;
 const COUNTDOWN_MAX = 10;
 const SHAKE_THRESHOLD_MIN = 0;
 const SHAKE_THRESHOLD_MAX = 100;
-const PHOTO_LEVELS: PhotoResolution[] = ["low", "medium", "high"];
 const AUDIO_LEVELS: AudioQuality[] = ["low", "medium", "high"];
 
 const LEVEL_LABELS = {
@@ -257,6 +256,7 @@ export default function SettingsScreen() {
           value={settings.photoResolutionPercent}
           valueLabel={`${settings.photoResolutionPercent}%`}
         />
+
         <View style={[styles.sectionHeading, styles.voiceSectionHeading]}>
           <MaterialIcons color="#A8A8AD" name="mic" size={20} />
           <Text style={styles.sectionTitle}>Voice Recorder</Text>
