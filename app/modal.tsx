@@ -14,7 +14,6 @@ import { useState } from "react";
 
 import {
   type AudioQuality,
-  type PhotoResolution,
   useSettings,
 } from "@/contexts/settings-context";
 
