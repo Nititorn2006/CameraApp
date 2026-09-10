@@ -16,6 +16,7 @@ export type AppSettings = {
   countdownSeconds: number;
   shakeThresholdPercent: number;
   photoResolution: PhotoResolution;
+  photoResolutionPercent: number;
   audioQuality: AudioQuality;
 };
 
@@ -31,6 +32,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   countdownSeconds: 3,
   shakeThresholdPercent: 50,
   photoResolution: "high",
+  photoResolutionPercent: 100,
   audioQuality: "high",
 };
 
@@ -60,11 +62,20 @@ function getStoredSettings(value: unknown): AppSettings {
       : DEFAULT_SETTINGS.shakeThresholdPercent;
 
   const photoResolution =
+  typeof stored.photoResolutionPercent === "number" &&
     stored.photoResolution === "low" ||
     stored.photoResolution === "medium" ||
     stored.photoResolution === "high"
       ? stored.photoResolution
       : DEFAULT_SETTINGS.photoResolution;
+
+  const photoResolutionPercent =
+    typeof stored.photoResolutionPercent === "number" &&
+    Number.isInteger(stored.photoResolutionPercent) &&
+    stored.photoResolutionPercent >= 0 &&
+    stored.photoResolutionPercent <= 100
+        ? stored.photoResolutionPercent
+        : DEFAULT_SETTINGS.photoResolutionPercent;
 
   const audioQuality =
     stored.audioQuality === "low" ||
@@ -77,6 +88,7 @@ function getStoredSettings(value: unknown): AppSettings {
     countdownSeconds,
     shakeThresholdPercent,
     photoResolution,
+    photoResolutionPercent,
     audioQuality,
   };
 }
@@ -118,32 +130,22 @@ export function SettingsProvider({ children }: PropsWithChildren) {
     };
   }, []);
 
-  const updateSettings = useCallback((updates: Partial<AppSettings>) => {
-    const nextSettings = getStoredSettings({
+  const updateSettings =
+  useCallback((updates: Partial<AppSettings>) => {
+    changedBeforeLoadRef.current = true;
+
+    const nextSettings = {
       ...settingsRef.current,
       ...updates,
-    });
+    };
 
-    if (
-      nextSettings.countdownSeconds === settingsRef.current.countdownSeconds &&
-      nextSettings.shakeThresholdPercent ===
-        settingsRef.current.shakeThresholdPercent &&
-      nextSettings.photoResolution === settingsRef.current.photoResolution &&
-      nextSettings.audioQuality === settingsRef.current.audioQuality
-    ) {
-      return;
-    }
-
-    changedBeforeLoadRef.current = true;
     settingsRef.current = nextSettings;
     setSettings(nextSettings);
 
     void AsyncStorage.setItem(
       STORAGE_KEY,
       JSON.stringify(nextSettings)
-    ).catch((error) => {
-      console.warn("Unable to save settings:", error);
-    });
+    );
   }, []);
 
   return (

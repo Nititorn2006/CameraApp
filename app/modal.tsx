@@ -243,15 +243,19 @@ export default function SettingsScreen() {
 
         <Text style={styles.groupLabel}>PHOTO RESOLUTION</Text>
 
-        <SettingDropdown
-          value={settings.photoResolution}
-          options={PHOTO_LEVELS}
-          labels={LEVEL_LABELS}
-          onValueChange={(resolution) => {
-          updateSettings({
-          photoResolution: resolution,
-            });
-          }}
+        <SettingSlider
+          accessibilityLabel="Photo resolution percentage"
+          description="Photo resolution quality"
+          maximumLabel="100%"
+          maximumValue={100}
+          minimumLabel="0%"
+          minimumValue={0}
+          onValueChange={(value) =>
+            updateSettings({ photoResolutionPercent: Math.round(value) })
+          }
+          title="Photo Resolution"
+          value={settings.photoResolutionPercent}
+          valueLabel={`${settings.photoResolutionPercent}%`}
         />
         <View style={[styles.sectionHeading, styles.voiceSectionHeading]}>
           <MaterialIcons color="#A8A8AD" name="mic" size={20} />

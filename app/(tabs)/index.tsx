@@ -19,9 +19,9 @@ import type {
 } from "expo-camera";
 
 import * as MediaLibrary from "expo-media-library";
+import { saveToLibraryAsync } from "expo-media-library/legacy";
 
-import { router } from "expo-router";
-import { useIsFocused } from "@react-navigation/native";
+import { router, useIsFocused } from "expo-router";
 
 import {
     Accelerometer,
@@ -48,8 +48,8 @@ type NumericPictureSize = {
     value: string;
 };
 
-const SHAKE_FORCE_MIN = 1.05;
-const SHAKE_FORCE_MID = 2.2;
+const SHAKE_FORCE_MIN = 2;
+const SHAKE_FORCE_MID = 3.5;
 const SHAKE_FORCE_MAX = 5.0;
 
 function getShakeForceThreshold(percent: number) {
@@ -434,7 +434,7 @@ export default function CameraPage() {
                     return;
                 }
 
-                await MediaLibrary.saveToLibraryAsync(
+                await saveToLibraryAsync(
                     photo.uri
                 );
 
@@ -821,14 +821,16 @@ const styles = StyleSheet.create({
     },
 
     captureFlash: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         backgroundColor: "white",
     },
 
     countdownContainer: {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         justifyContent: "center",
         alignItems: "center",
+        zIndex: 5,
+        elevation:10,
     },
 
     countdownText: {

@@ -9,11 +9,8 @@ import {
 
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { router } from "expo-router";
-import {
-    useIsFocused,
-    usePreventRemove,
-} from "@react-navigation/native";
+import { router, useIsFocused } from "expo-router";
+import { usePreventRemove } from "expo-router/react-navigation";
 
 import {
     AudioQuality,
