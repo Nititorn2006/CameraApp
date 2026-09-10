@@ -141,6 +141,80 @@ function selectPictureSize(
     return candidates[index]?.value;
 }
 
+function selectPictureSizeByPercent(
+    availableSizes: string[],
+    percent: number
+) {
+    const clampedPercent =
+        Math.max(0, Math.min(100, percent));
+
+    const numericSizes =
+        availableSizes
+            .map((value): NumericPictureSize | null => {
+                const match = /^(\d+)x(\d+)$/.exec(value);
+
+                if (!match) {
+                    return null;
+                }
+
+                const width = Number(match[1]);
+                const height = Number(match[2]);
+
+                return {
+                    pixels: width * height,
+                    ratio: Math.max(width, height) /
+                        Math.min(width, height),
+                    value,
+                };
+            })
+            .filter(
+                (size): size is NumericPictureSize =>
+                    size !== null
+            );
+
+    const fourByThreeSizes =
+        numericSizes.filter(size =>
+            Math.abs(size.ratio - 4 / 3) < 0.03
+        );
+    const candidates =
+        fourByThreeSizes.length >= 3
+            ? fourByThreeSizes
+            : numericSizes;
+
+    candidates.sort((first, second) =>
+        first.pixels - second.pixels
+    );
+
+    if (candidates.length === 0) {
+        if (clampedPercent <= 33) {
+            return selectPictureSize(
+                availableSizes,
+                "low"
+            );
+        }
+
+        if (clampedPercent <= 66) {
+            return selectPictureSize(
+                availableSizes,
+                "medium"
+            );
+        }
+
+        return selectPictureSize(
+            availableSizes,
+            "high"
+        );
+    }
+
+    const index =
+        Math.round(
+            (clampedPercent / 100) *
+                (candidates.length - 1)
+        );
+
+    return candidates[index]?.value;
+}
+
 export default function CameraPage() {
     const isFocused = useIsFocused();
     const insets = useSafeAreaInsets();
@@ -205,9 +279,9 @@ export default function CameraPage() {
     });
 
     const selectedPictureSize =
-        selectPictureSize(
+        selectPictureSizeByPercent(
             availablePictureSizes,
-            settings.photoResolution
+            settings.photoResolutionPercent
         );
 
     const setCameraInstance =
@@ -279,9 +353,9 @@ export default function CameraPage() {
                 }
 
                 const resolvedSize =
-                    selectPictureSize(
+                    selectPictureSizeByPercent(
                         sizes,
-                        settings.photoResolution
+                        settings.photoResolutionPercent
                     );
 
                 if (resolvedSize) {
@@ -307,7 +381,7 @@ export default function CameraPage() {
                     setIsCameraReady(true);
                 }
             }
-        }, [selectedPictureSize, settings.photoResolution]);
+        }, [selectedPictureSize, settings.photoResolutionPercent]);
 
     const takePhoto =
         useCallback(async () => {
