@@ -1,959 +1,783 @@
 import {
-    View,
-    Text,
-    Pressable,
-    StyleSheet,
     Alert,
     Animated,
     AppState,
     type AppStateStatus,
+    Pressable,
+    StyleSheet,
+    Text,
+    View,
 } from "react-native";
 
-import {
-    CameraView,
-    useCameraPermissions,
-} from "expo-camera";
+import { CameraView, useCameraPermissions } from "expo-camera";
 
-import type {
-    CameraType,
-} from "expo-camera";
+import type { CameraType } from "expo-camera";
 
 import * as MediaLibrary from "expo-media-library";
 import { saveToLibraryAsync } from "expo-media-library/legacy";
 
 import { router, useIsFocused } from "expo-router";
 
-import {
-    Accelerometer,
-} from "expo-sensors";
+import { Accelerometer } from "expo-sensors";
 
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import {
-    useCallback,
-    useEffect,
-    useRef,
-    useState,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { SettingsButton } from "@/components/settings-button";
-import {
-    type PhotoResolution,
-    useSettings,
-} from "@/contexts/settings-context";
+import { type PhotoResolution, useSettings } from "@/contexts/settings-context";
 
 type NumericPictureSize = {
-    pixels: number;
-    ratio: number;
-    value: string;
+  pixels: number;
+  ratio: number;
+  value: string;
 };
 
-const SHAKE_FORCE_MIN = 2;
-const SHAKE_FORCE_MID = 3.5;
+const SHAKE_FORCE_MIN = 1;
+const SHAKE_FORCE_MID = 2.5;
 const SHAKE_FORCE_MAX = 5.0;
 
 function getShakeForceThreshold(percent: number) {
-    const clampedPercent =
-        Math.max(0, Math.min(100, percent));
+  const clampedPercent = Math.max(0, Math.min(100, percent));
 
-    if (clampedPercent <= 50) {
-        return (
-            SHAKE_FORCE_MIN +
-            (clampedPercent / 50) *
-                (SHAKE_FORCE_MID - SHAKE_FORCE_MIN)
-        );
-    }
-
+  if (clampedPercent <= 50) {
     return (
-        SHAKE_FORCE_MID +
-        ((clampedPercent - 50) / 50) *
-            (SHAKE_FORCE_MAX - SHAKE_FORCE_MID)
+      SHAKE_FORCE_MIN +
+      (clampedPercent / 50) * (SHAKE_FORCE_MID - SHAKE_FORCE_MIN)
     );
+  }
+
+  return (
+    SHAKE_FORCE_MID +
+    ((clampedPercent - 50) / 50) * (SHAKE_FORCE_MAX - SHAKE_FORCE_MID)
+  );
 }
 
 function selectPictureSize(
-    availableSizes: string[],
-    resolution: PhotoResolution
+  availableSizes: string[],
+  resolution: PhotoResolution,
 ) {
-    const symbolicSizes: Record<PhotoResolution, string[]> = {
-        low: ["Low"],
-        medium: ["Medium"],
-        high: ["Photo", "High"],
-    };
+  const symbolicSizes: Record<PhotoResolution, string[]> = {
+    low: ["Low"],
+    medium: ["Medium"],
+    high: ["Photo", "High"],
+  };
 
-    const symbolicMatch =
-        symbolicSizes[resolution].find(size =>
-            availableSizes.includes(size)
-        );
+  const symbolicMatch = symbolicSizes[resolution].find((size) =>
+    availableSizes.includes(size),
+  );
 
-    if (symbolicMatch) {
-        return symbolicMatch;
-    }
+  if (symbolicMatch) {
+    return symbolicMatch;
+  }
 
-    const numericSizes =
-        availableSizes
-            .map((value): NumericPictureSize | null => {
-                const match = /^(\d+)x(\d+)$/.exec(value);
+  const numericSizes = availableSizes
+    .map((value): NumericPictureSize | null => {
+      const match = /^(\d+)x(\d+)$/.exec(value);
 
-                if (!match) {
-                    return null;
-                }
+      if (!match) {
+        return null;
+      }
 
-                const width = Number(match[1]);
-                const height = Number(match[2]);
+      const width = Number(match[1]);
+      const height = Number(match[2]);
 
-                return {
-                    pixels: width * height,
-                    ratio: Math.max(width, height) /
-                        Math.min(width, height),
-                    value,
-                };
-            })
-            .filter(
-                (size): size is NumericPictureSize =>
-                    size !== null
-            );
+      return {
+        pixels: width * height,
+        ratio: Math.max(width, height) / Math.min(width, height),
+        value,
+      };
+    })
+    .filter((size): size is NumericPictureSize => size !== null);
 
-    const fourByThreeSizes =
-        numericSizes.filter(size =>
-            Math.abs(size.ratio - 4 / 3) < 0.03
-        );
-    const candidates =
-        fourByThreeSizes.length >= 3
-            ? fourByThreeSizes
-            : numericSizes;
+  const fourByThreeSizes = numericSizes.filter(
+    (size) => Math.abs(size.ratio - 4 / 3) < 0.03,
+  );
+  const candidates =
+    fourByThreeSizes.length >= 3 ? fourByThreeSizes : numericSizes;
 
-    candidates.sort((first, second) =>
-        first.pixels - second.pixels
-    );
+  candidates.sort((first, second) => first.pixels - second.pixels);
 
-    if (candidates.length === 0) {
-        return undefined;
-    }
+  if (candidates.length === 0) {
+    return undefined;
+  }
 
-    const index =
-        resolution === "low"
-            ? 0
-            : resolution === "medium"
-              ? Math.floor((candidates.length - 1) / 2)
-              : candidates.length - 1;
+  const index =
+    resolution === "low"
+      ? 0
+      : resolution === "medium"
+        ? Math.floor((candidates.length - 1) / 2)
+        : candidates.length - 1;
 
-    return candidates[index]?.value;
+  return candidates[index]?.value;
 }
 
-function selectPictureSizeByPercent(
-    availableSizes: string[],
-    percent: number
-) {
-    const clampedPercent =
-        Math.max(0, Math.min(100, percent));
+function selectPictureSizeByPercent(availableSizes: string[], percent: number) {
+  const clampedPercent = Math.max(0, Math.min(100, percent));
 
-    const numericSizes =
-        availableSizes
-            .map((value): NumericPictureSize | null => {
-                const match = /^(\d+)x(\d+)$/.exec(value);
+  const numericSizes = availableSizes
+    .map((value): NumericPictureSize | null => {
+      const match = /^(\d+)x(\d+)$/.exec(value);
 
-                if (!match) {
-                    return null;
-                }
+      if (!match) {
+        return null;
+      }
 
-                const width = Number(match[1]);
-                const height = Number(match[2]);
+      const width = Number(match[1]);
+      const height = Number(match[2]);
 
-                return {
-                    pixels: width * height,
-                    ratio: Math.max(width, height) /
-                        Math.min(width, height),
-                    value,
-                };
-            })
-            .filter(
-                (size): size is NumericPictureSize =>
-                    size !== null
-            );
+      return {
+        pixels: width * height,
+        ratio: Math.max(width, height) / Math.min(width, height),
+        value,
+      };
+    })
+    .filter((size): size is NumericPictureSize => size !== null);
 
-    const fourByThreeSizes =
-        numericSizes.filter(size =>
-            Math.abs(size.ratio - 4 / 3) < 0.03
-        );
-    const candidates =
-        fourByThreeSizes.length >= 3
-            ? fourByThreeSizes
-            : numericSizes;
+  const fourByThreeSizes = numericSizes.filter(
+    (size) => Math.abs(size.ratio - 4 / 3) < 0.03,
+  );
+  const candidates =
+    fourByThreeSizes.length >= 3 ? fourByThreeSizes : numericSizes;
 
-    candidates.sort((first, second) =>
-        first.pixels - second.pixels
-    );
+  candidates.sort((first, second) => first.pixels - second.pixels);
 
-    if (candidates.length === 0) {
-        if (clampedPercent <= 33) {
-            return selectPictureSize(
-                availableSizes,
-                "low"
-            );
-        }
-
-        if (clampedPercent <= 66) {
-            return selectPictureSize(
-                availableSizes,
-                "medium"
-            );
-        }
-
-        return selectPictureSize(
-            availableSizes,
-            "high"
-        );
+  if (candidates.length === 0) {
+    if (clampedPercent <= 33) {
+      return selectPictureSize(availableSizes, "low");
     }
 
-    const index =
-        Math.round(
-            (clampedPercent / 100) *
-                (candidates.length - 1)
-        );
+    if (clampedPercent <= 66) {
+      return selectPictureSize(availableSizes, "medium");
+    }
 
-    return candidates[index]?.value;
+    return selectPictureSize(availableSizes, "high");
+  }
+
+  const index = Math.round((clampedPercent / 100) * (candidates.length - 1));
+
+  return candidates[index]?.value;
 }
 
 export default function CameraPage() {
-    const isFocused = useIsFocused();
-    const insets = useSafeAreaInsets();
-    const { isHydrated, settings } = useSettings();
+  const isFocused = useIsFocused();
+  const insets = useSafeAreaInsets();
+  const { isHydrated, settings } = useSettings();
 
-    const cameraRef =
-        useRef<CameraView>(null);
+  const cameraRef = useRef<CameraView>(null);
 
-    const cameraReadyRef =
-        useRef(false);
+  const cameraReadyRef = useRef(false);
 
-    const isFocusedRef =
-        useRef(isFocused);
+  const isFocusedRef = useRef(isFocused);
 
-    const appIsActiveRef =
-        useRef(AppState.currentState === "active");
+  const appIsActiveRef = useRef(AppState.currentState === "active");
 
-    const takingPhotoRef =
-        useRef(false);
+  const takingPhotoRef = useRef(false);
 
-    const countdownActiveRef =
-        useRef(false);
+  const countdownActiveRef = useRef(false);
 
-    const countdownTimerRef =
-        useRef<ReturnType<typeof setInterval> | null>(null);
+  const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-    const pendingCaptureRef =
-        useRef(false);
+  const pendingCaptureRef = useRef(false);
 
-    const flashOpacity =
-        useRef(new Animated.Value(0)).current;
+  const [flashOpacity] = useState(() => new Animated.Value(0));
 
-    const [facing, setFacing] =
-        useState<CameraType>("back");
+  const [facing, setFacing] = useState<CameraType>("back");
 
-    const [isTakingPhoto, setIsTakingPhoto] =
-        useState(false);
+  const [isTakingPhoto, setIsTakingPhoto] = useState(false);
 
-    const [isCameraReady, setIsCameraReady] =
-        useState(false);
+  const [isCameraReady, setIsCameraReady] = useState(false);
 
-    const [availablePictureSizes, setAvailablePictureSizes] =
-        useState<string[]>([]);
+  const [availablePictureSizes, setAvailablePictureSizes] = useState<string[]>(
+    [],
+  );
 
-    const [appState, setAppState] =
-        useState<AppStateStatus>(AppState.currentState);
+  const [appState, setAppState] = useState<AppStateStatus>(
+    AppState.currentState,
+  );
 
-    const [countdown, setCountdown] =
-        useState<number | null>(null);
+  const [countdown, setCountdown] = useState<number | null>(null);
 
-    const [
-        cameraPermission,
-        requestCameraPermission,
-    ] = useCameraPermissions();
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
 
-    const [
-        mediaPermission,
-        requestMediaPermission,
-    ] = MediaLibrary.usePermissions({
-        writeOnly: true,
-        granularPermissions: ["photo"],
-    });
+  const [mediaPermission, requestMediaPermission] = MediaLibrary.usePermissions(
+    {
+      writeOnly: true,
+      granularPermissions: ["photo"],
+    },
+  );
 
-    const selectedPictureSize =
-        selectPictureSizeByPercent(
-            availablePictureSizes,
-            settings.photoResolutionPercent
-        );
+  const selectedPictureSize = selectPictureSizeByPercent(
+    availablePictureSizes,
+    settings.photoResolutionPercent,
+  );
 
-    const setCameraInstance =
-        useCallback((camera: CameraView | null) => {
-            cameraRef.current = camera;
-            cameraReadyRef.current = false;
-            setIsCameraReady(false);
-        }, []);
+  const setCameraInstance = useCallback((camera: CameraView | null) => {
+    cameraRef.current = camera;
+    cameraReadyRef.current = false;
+    setIsCameraReady(false);
+  }, []);
 
-    const showCaptureAnimation =
-        useCallback(() => {
-            flashOpacity.stopAnimation();
+  const showCaptureAnimation = useCallback(() => {
+    flashOpacity.stopAnimation();
 
-            flashOpacity.setValue(0.7);
+    flashOpacity.setValue(0.7);
 
-            Animated.timing(
-                flashOpacity,
-                {
-                    toValue: 0,
-                    duration: 250,
-                    useNativeDriver: true,
-                }
-            ).start();
-        }, [flashOpacity]);
+    Animated.timing(flashOpacity, {
+      toValue: 0,
+      duration: 250,
+      useNativeDriver: true,
+    }).start();
+  }, [flashOpacity]);
 
-    const cancelCountdown =
-        useCallback(() => {
-            if (countdownTimerRef.current) {
-                clearInterval(
-                    countdownTimerRef.current
-                );
+  const cancelCountdown = useCallback(() => {
+    if (countdownTimerRef.current) {
+      clearInterval(countdownTimerRef.current);
 
-                countdownTimerRef.current = null;
-            }
+      countdownTimerRef.current = null;
+    }
 
-            countdownActiveRef.current = false;
-            setCountdown(null);
-        }, []);
+    countdownActiveRef.current = false;
+    setCountdown(null);
+  }, []);
 
-    const handleCameraReady =
-        useCallback(async () => {
-            const camera = cameraRef.current;
+  const handleCameraReady = useCallback(async () => {
+    const camera = cameraRef.current;
 
-            if (
-                !camera ||
-                !isFocusedRef.current ||
-                !appIsActiveRef.current
-            ) {
-                return;
-            }
+    if (!camera || !isFocusedRef.current || !appIsActiveRef.current) {
+      return;
+    }
 
-            if (selectedPictureSize) {
-                cameraReadyRef.current = true;
-                setIsCameraReady(true);
+    if (selectedPictureSize) {
+      cameraReadyRef.current = true;
+      setIsCameraReady(true);
 
-                return;
-            }
+      return;
+    }
 
-            try {
-                const sizes =
-                    await camera.getAvailablePictureSizesAsync();
+    try {
+      const sizes = await camera.getAvailablePictureSizesAsync();
 
-                if (
-                    !isFocusedRef.current ||
-                    !appIsActiveRef.current ||
-                    cameraRef.current !== camera
-                ) {
-                    return;
-                }
+      if (
+        !isFocusedRef.current ||
+        !appIsActiveRef.current ||
+        cameraRef.current !== camera
+      ) {
+        return;
+      }
 
-                const resolvedSize =
-                    selectPictureSizeByPercent(
-                        sizes,
-                        settings.photoResolutionPercent
-                    );
+      const resolvedSize = selectPictureSizeByPercent(
+        sizes,
+        settings.photoResolutionPercent,
+      );
 
-                if (resolvedSize) {
-                    setAvailablePictureSizes(sizes);
+      if (resolvedSize) {
+        setAvailablePictureSizes(sizes);
 
-                    return;
-                }
+        return;
+      }
 
-                cameraReadyRef.current = true;
-                setIsCameraReady(true);
-            } catch (error) {
-                console.warn(
-                    "Unable to get picture sizes:",
-                    error
-                );
+      cameraReadyRef.current = true;
+      setIsCameraReady(true);
+    } catch (error) {
+      console.warn("Unable to get picture sizes:", error);
 
-                if (
-                    isFocusedRef.current &&
-                    appIsActiveRef.current &&
-                    cameraRef.current === camera
-                ) {
-                    cameraReadyRef.current = true;
-                    setIsCameraReady(true);
-                }
-            }
-        }, [selectedPictureSize, settings.photoResolutionPercent]);
+      if (
+        isFocusedRef.current &&
+        appIsActiveRef.current &&
+        cameraRef.current === camera
+      ) {
+        cameraReadyRef.current = true;
+        setIsCameraReady(true);
+      }
+    }
+  }, [selectedPictureSize, settings.photoResolutionPercent]);
 
-    const takePhoto =
-        useCallback(async () => {
-            const camera = cameraRef.current;
+  const takePhoto = useCallback(async () => {
+    const camera = cameraRef.current;
 
-            if (
-                takingPhotoRef.current ||
-                !camera ||
-                !cameraReadyRef.current ||
-                !isFocusedRef.current ||
-                !appIsActiveRef.current
-            ) {
-                return;
-            }
+    if (
+      takingPhotoRef.current ||
+      !camera ||
+      !cameraReadyRef.current ||
+      !isFocusedRef.current ||
+      !appIsActiveRef.current
+    ) {
+      return;
+    }
 
-            takingPhotoRef.current = true;
-            setIsTakingPhoto(true);
+    takingPhotoRef.current = true;
+    setIsTakingPhoto(true);
 
-            try {
-                if (!mediaPermission?.granted) {
-                    pendingCaptureRef.current = true;
+    try {
+      if (!mediaPermission?.granted) {
+        pendingCaptureRef.current = true;
 
-                    const result =
-                        await requestMediaPermission();
+        const result = await requestMediaPermission();
 
-                    if (!result.granted) {
-                        pendingCaptureRef.current = false;
+        if (!result.granted) {
+          pendingCaptureRef.current = false;
 
-                        return;
-                    }
-
-                    return;
-                }
-
-                if (
-                    !cameraReadyRef.current ||
-                    !isFocusedRef.current ||
-                    !appIsActiveRef.current ||
-                    cameraRef.current !== camera
-                ) {
-                    return;
-                }
-
-                showCaptureAnimation();
-
-                const photo =
-                    await camera.takePictureAsync();
-
-                if (!photo) {
-                    return;
-                }
-
-                await saveToLibraryAsync(
-                    photo.uri
-                );
-
-                console.log(
-                    "Saved to Photos:",
-                    photo.uri
-                );
-
-            } catch (error) {
-                pendingCaptureRef.current = false;
-
-                console.log(
-                    "Take photo error:",
-                    error
-                );
-
-                Alert.alert(
-                    "Error",
-                    "Cannot save photo"
-                );
-
-            } finally {
-                takingPhotoRef.current = false;
-                setIsTakingPhoto(false);
-            }
-        }, [
-            mediaPermission?.granted,
-            requestMediaPermission,
-            showCaptureAnimation,
-        ]);
-
-    useEffect(() => {
-        if (
-            !pendingCaptureRef.current ||
-            !mediaPermission?.granted ||
-            !isCameraReady ||
-            !isFocused ||
-            appState !== "active"
-        ) {
-            return;
+          return;
         }
 
-        pendingCaptureRef.current = false;
-        void takePhoto();
-    }, [
-        appState,
-        isCameraReady,
-        isFocused,
-        mediaPermission?.granted,
-        takePhoto,
-    ]);
+        return;
+      }
 
-    const startShakeCountdown =
-        useCallback(() => {
-            if (
-                countdownActiveRef.current ||
-                takingPhotoRef.current ||
-                !cameraReadyRef.current ||
-                !isFocusedRef.current ||
-                !appIsActiveRef.current
-            ) {
-                return;
-            }
+      if (
+        !cameraReadyRef.current ||
+        !isFocusedRef.current ||
+        !appIsActiveRef.current ||
+        cameraRef.current !== camera
+      ) {
+        return;
+      }
 
-            countdownActiveRef.current = true;
+      showCaptureAnimation();
 
-            let current = settings.countdownSeconds;
+      const photo = await camera.takePictureAsync();
 
-            setCountdown(current);
+      if (!photo) {
+        return;
+      }
 
-            countdownTimerRef.current =
-                setInterval(() => {
-                    current -= 1;
+      await saveToLibraryAsync(photo.uri);
 
-                    if (current > 0) {
-                        setCountdown(current);
+      console.log("Saved to Photos:", photo.uri);
+    } catch (error) {
+      pendingCaptureRef.current = false;
 
-                        return;
-                    }
+      console.log("Take photo error:", error);
 
-                    if (countdownTimerRef.current) {
-                        clearInterval(
-                            countdownTimerRef.current
-                        );
+      Alert.alert("Error", "Cannot save photo");
+    } finally {
+      takingPhotoRef.current = false;
+      setIsTakingPhoto(false);
+    }
+  }, [mediaPermission, requestMediaPermission, showCaptureAnimation]);
 
-                        countdownTimerRef.current = null;
-                    }
+  useEffect(() => {
+    if (
+      !pendingCaptureRef.current ||
+      !mediaPermission?.granted ||
+      !isCameraReady ||
+      !isFocused ||
+      appState !== "active"
+    ) {
+      return;
+    }
 
-                    setCountdown(null);
+    pendingCaptureRef.current = false;
+    void takePhoto();
+  }, [appState, isCameraReady, isFocused, mediaPermission?.granted, takePhoto]);
 
-                    void (async () => {
-                        try {
-                            await takePhoto();
-                        } finally {
-                            countdownActiveRef.current =
-                                false;
-                        }
-                    })();
-                }, 1000);
-        }, [settings.countdownSeconds, takePhoto]);
+  const startShakeCountdown = useCallback(() => {
+    if (
+      countdownActiveRef.current ||
+      takingPhotoRef.current ||
+      !cameraReadyRef.current ||
+      !isFocusedRef.current ||
+      !appIsActiveRef.current
+    ) {
+      return;
+    }
 
-    useEffect(() => {
-        isFocusedRef.current = isFocused;
+    countdownActiveRef.current = true;
 
-        if (!isFocused) {
-            cameraReadyRef.current = false;
-            pendingCaptureRef.current = false;
-            cancelCountdown();
+    let current = settings.countdownSeconds;
+
+    setCountdown(current);
+
+    countdownTimerRef.current = setInterval(() => {
+      current -= 1;
+
+      if (current > 0) {
+        setCountdown(current);
+
+        return;
+      }
+
+      if (countdownTimerRef.current) {
+        clearInterval(countdownTimerRef.current);
+
+        countdownTimerRef.current = null;
+      }
+
+      setCountdown(null);
+
+      void (async () => {
+        try {
+          await takePhoto();
+        } finally {
+          countdownActiveRef.current = false;
         }
-    }, [cancelCountdown, isFocused]);
+      })();
+    }, 1000);
+  }, [settings.countdownSeconds, takePhoto]);
 
-    useEffect(() => {
-        const subscription =
-            AppState.addEventListener(
-                "change",
-                nextAppState => {
-                    const isActive =
-                        nextAppState === "active";
+  useEffect(() => {
+    isFocusedRef.current = isFocused;
 
-                    appIsActiveRef.current = isActive;
-                    setAppState(nextAppState);
+    if (!isFocused) {
+      cameraReadyRef.current = false;
+      pendingCaptureRef.current = false;
 
-                    if (!isActive) {
-                        cameraReadyRef.current = false;
-                        setIsCameraReady(false);
-                        cancelCountdown();
-                    }
-                }
-            );
+      if (countdownTimerRef.current) {
+        clearInterval(countdownTimerRef.current);
+        countdownTimerRef.current = null;
+      }
 
-        return () => {
-            subscription.remove();
-        };
-    }, [cancelCountdown]);
+      countdownActiveRef.current = false;
+    }
+  }, [isFocused]);
 
-    useEffect(() => {
-        if (
-            !cameraPermission?.granted ||
-            !isCameraReady ||
-            !isFocused ||
-            !isHydrated ||
-            appState !== "active"
-        ) {
-            return;
-        }
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextAppState) => {
+      const isActive = nextAppState === "active";
 
-        Accelerometer.setUpdateInterval(100);
+      appIsActiveRef.current = isActive;
+      setAppState(nextAppState);
 
-        let lastShakeTime = 0;
-
-        const subscription =
-            Accelerometer.addListener(
-                ({ x, y, z }) => {
-                    const force =
-                        Math.sqrt(
-                            x * x +
-                            y * y +
-                            z * z
-                        );
-
-                    const now =
-                        Date.now();
-
-                    const shakeThreshold =
-                        getShakeForceThreshold(
-                            settings.shakeThresholdPercent
-                        );
-
-                    if (
-                        force > shakeThreshold &&
-                        now - lastShakeTime > 1000
-                    ) {
-                        lastShakeTime = now;
-
-                        startShakeCountdown();
-                    }
-                }
-            );
-
-        return () => {
-            subscription.remove();
-        };
-    }, [
-        cameraPermission?.granted,
-        appState,
-        isCameraReady,
-        isFocused,
-        isHydrated,
-        settings.shakeThresholdPercent,
-        startShakeCountdown,
-    ]);
-
-    useEffect(() => {
-        return () => {
-            cancelCountdown();
-        };
-    }, [cancelCountdown]);
-
-    const flipCamera = () => {
-        if (
-            isTakingPhoto ||
-            countdownActiveRef.current
-        ) {
-            return;
-        }
-
+      if (!isActive) {
         cameraReadyRef.current = false;
         setIsCameraReady(false);
-        setAvailablePictureSizes([]);
+        cancelCountdown();
+      }
+    });
 
-        setFacing(
-            current =>
-                current === "back"
-                    ? "front"
-                    : "back"
-        );
+    return () => {
+      subscription.remove();
     };
+  }, [cancelCountdown]);
 
-    if (!cameraPermission) {
-        return <View />;
+  useEffect(() => {
+    if (
+      !cameraPermission?.granted ||
+      !isCameraReady ||
+      !isFocused ||
+      !isHydrated ||
+      appState !== "active"
+    ) {
+      return;
     }
 
-    if (!cameraPermission.granted) {
-        return (
-            <View style={styles.permissionContainer}>
-                <SettingsButton
-                    disabled={!isHydrated}
-                    style={[
-                        styles.settingsButton,
-                        { top: insets.top + 10 },
-                    ]}
-                />
+    Accelerometer.setUpdateInterval(100);
 
-                <Text style={styles.permissionText}>
-                    Camera permission is required
-                </Text>
+    let lastShakeTime = 0;
 
-                <Pressable
-                    accessibilityLabel="Allow camera access"
-                    accessibilityRole="button"
-                    onPress={requestCameraPermission}
-                    style={styles.permissionButton}
-                >
-                    <Text style={styles.permissionButtonText}>
-                        Allow Camera
-                    </Text>
-                </Pressable>
-            </View>
-        );
+    const subscription = Accelerometer.addListener(({ x, y, z }) => {
+      const force = Math.sqrt(x * x + y * y + z * z);
+
+      const now = Date.now();
+
+      const shakeThreshold = getShakeForceThreshold(
+        settings.shakeThresholdPercent,
+      );
+
+      if (force > shakeThreshold && now - lastShakeTime > 1000) {
+        lastShakeTime = now;
+
+        startShakeCountdown();
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [
+    cameraPermission?.granted,
+    appState,
+    isCameraReady,
+    isFocused,
+    isHydrated,
+    settings.shakeThresholdPercent,
+    startShakeCountdown,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      cancelCountdown();
+    };
+  }, [cancelCountdown]);
+
+  const flipCamera = () => {
+    if (isTakingPhoto || countdownActiveRef.current) {
+      return;
     }
 
-    const controlsDisabled =
-        isTakingPhoto ||
-        countdown !== null ||
-        !isCameraReady ||
-        !isHydrated;
+    cameraReadyRef.current = false;
+    setIsCameraReady(false);
+    setAvailablePictureSizes([]);
 
-    const cameraKey =
-        `${facing}:${selectedPictureSize ?? "detect"}`;
+    setFacing((current) => (current === "back" ? "front" : "back"));
+  };
 
+  if (!cameraPermission) {
+    return <View />;
+  }
+
+  if (!cameraPermission.granted) {
     return (
-        <View style={styles.container}>
-            <View style={styles.topBlackBar} />
+      <View style={styles.permissionContainer}>
+        <SettingsButton
+          disabled={!isHydrated}
+          style={[styles.settingsButton, { top: insets.top + 10 }]}
+        />
 
-            {isFocused && appState === "active" && (
-                <CameraView
-                    facing={facing}
-                    key={cameraKey}
-                    onCameraReady={handleCameraReady}
-                    pictureSize={selectedPictureSize}
-                    ratio={
-                        selectedPictureSize
-                            ? undefined
-                            : "4:3"
-                    }
-                    ref={setCameraInstance}
-                    style={styles.camera}
-                />
-            )}
+        <Text style={styles.permissionText}>Camera permission is required</Text>
 
-            <Animated.View
-                pointerEvents="none"
-                style={[
-                    styles.captureFlash,
-                    {
-                        opacity: flashOpacity,
-                    },
-                ]}
-            />
-
-            <SettingsButton
-                disabled={
-                    !isHydrated ||
-                    isTakingPhoto ||
-                    countdown !== null
-                }
-                style={[
-                    styles.settingsButton,
-                    { top: insets.top + 10 },
-                ]}
-            />
-
-            <Pressable
-                accessibilityLabel="Open voice recorder"
-                accessibilityRole="button"
-                disabled={controlsDisabled}
-                onPress={() => {
-                    cancelCountdown();
-                    router.push("/(tabs)/voice_record");
-                }}
-                style={[
-                    styles.voiceButton,
-                    controlsDisabled &&
-                        styles.sideControlDisabled,
-                ]}
-            >
-                <Text style={styles.voiceButtonText}>
-                    Voice Recorder
-                </Text>
-            </Pressable>
-
-            {countdown !== null && (
-                <View
-                    pointerEvents="none"
-                    style={styles.countdownContainer}
-                >
-                    <Text style={styles.countdownText}>
-                        {countdown}
-                    </Text>
-                </View>
-            )}
-
-            <View style={styles.bottomBlackBar} />
-
-            <View style={styles.controls}>
-                <View style={styles.sideButton} />
-
-                <Pressable
-                    accessibilityLabel="Take photo"
-                    accessibilityRole="button"
-                    accessibilityState={{ disabled: controlsDisabled }}
-                    disabled={controlsDisabled}
-                    onPress={takePhoto}
-                    style={[
-                        styles.shutterOuter,
-                        controlsDisabled &&
-                            styles.shutterDisabled,
-                    ]}
-                >
-                    <View
-                        style={styles.shutterInner}
-                    />
-                </Pressable>
-
-                <Pressable
-                    accessibilityLabel={
-                        facing === "back"
-                            ? "Switch to front camera"
-                            : "Switch to back camera"
-                    }
-                    accessibilityRole="button"
-                    accessibilityState={{ disabled: controlsDisabled }}
-                    disabled={controlsDisabled}
-                    onPress={flipCamera}
-                    style={styles.sideButton}
-                >
-                    <Text style={styles.flipText}>
-                        ↻
-                    </Text>
-                </Pressable>
-            </View>
-        </View>
+        <Pressable
+          accessibilityLabel="Allow camera access"
+          accessibilityRole="button"
+          onPress={requestCameraPermission}
+          style={styles.permissionButton}
+        >
+          <Text style={styles.permissionButtonText}>Allow Camera</Text>
+        </Pressable>
+      </View>
     );
+  }
+
+  const controlsDisabled =
+    isTakingPhoto || countdown !== null || !isCameraReady || !isHydrated;
+
+  const cameraKey = `${facing}:${selectedPictureSize ?? "detect"}`;
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.topBlackBar} />
+
+      {isFocused && appState === "active" && (
+        <CameraView
+          facing={facing}
+          key={cameraKey}
+          onCameraReady={handleCameraReady}
+          pictureSize={selectedPictureSize}
+          ratio={selectedPictureSize ? undefined : "4:3"}
+          ref={setCameraInstance}
+          style={styles.camera}
+        />
+      )}
+
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.captureFlash,
+          {
+            opacity: flashOpacity,
+          },
+        ]}
+      />
+
+      <SettingsButton
+        disabled={!isHydrated || isTakingPhoto || countdown !== null}
+        style={[styles.settingsButton, { top: insets.top + 10 }]}
+      />
+
+      <Pressable
+        accessibilityLabel="Open voice recorder"
+        accessibilityRole="button"
+        disabled={controlsDisabled}
+        onPress={() => {
+          cancelCountdown();
+          router.push("/(tabs)/voice_record");
+        }}
+        style={[
+          styles.voiceButton,
+          controlsDisabled && styles.sideControlDisabled,
+        ]}
+      >
+        <Text style={styles.voiceButtonText}>Voice Recorder</Text>
+      </Pressable>
+
+      {countdown !== null && (
+        <View pointerEvents="none" style={styles.countdownContainer}>
+          <Text style={styles.countdownText}>{countdown}</Text>
+        </View>
+      )}
+
+      <View style={styles.bottomBlackBar} />
+
+      <View style={styles.controls}>
+        <View style={styles.sideButton} />
+
+        <Pressable
+          accessibilityLabel="Take photo"
+          accessibilityRole="button"
+          accessibilityState={{ disabled: controlsDisabled }}
+          disabled={controlsDisabled}
+          onPress={takePhoto}
+          style={[
+            styles.shutterOuter,
+            controlsDisabled && styles.shutterDisabled,
+          ]}
+        >
+          <View style={styles.shutterInner} />
+        </Pressable>
+
+        <Pressable
+          accessibilityLabel={
+            facing === "back"
+              ? "Switch to front camera"
+              : "Switch to back camera"
+          }
+          accessibilityRole="button"
+          accessibilityState={{ disabled: controlsDisabled }}
+          disabled={controlsDisabled}
+          onPress={flipCamera}
+          style={styles.sideButton}
+        >
+          <Text style={styles.flipText}>↻</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: "black",
-    },
+  container: {
+    flex: 1,
+    backgroundColor: "black",
+  },
 
-    camera: {
-        flex: 1,
-    },
+  camera: {
+    flex: 1,
+  },
 
-    captureFlash: {
-        ...StyleSheet.absoluteFill,
-        backgroundColor: "white",
-    },
+  captureFlash: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: "white",
+  },
 
-    countdownContainer: {
-        ...StyleSheet.absoluteFill,
-        justifyContent: "center",
-        alignItems: "center",
-        zIndex: 5,
-        elevation:10,
-    },
+  countdownContainer: {
+    ...StyleSheet.absoluteFill,
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 5,
+    elevation: 10,
+  },
 
-    countdownText: {
-        color: "white",
-        fontSize: 100,
-        fontWeight: "bold",
-    },
+  countdownText: {
+    color: "white",
+    fontSize: 100,
+    fontWeight: "bold",
+  },
 
-    controls: {
-        position: "absolute",
-        bottom: 40,
-        width: "100%",
-        flexDirection: "row",
-        justifyContent: "space-around",
-        alignItems: "center",
-        zIndex: 3,
-    },
+  controls: {
+    position: "absolute",
+    bottom: 40,
+    width: "100%",
+    flexDirection: "row",
+    justifyContent: "space-around",
+    alignItems: "center",
+    zIndex: 3,
+  },
 
-    shutterOuter: {
-        width: 80,
-        height: 80,
-        borderRadius: 40,
-        borderWidth: 5,
-        borderColor: "white",
-        justifyContent: "center",
-        alignItems: "center",
-    },
+  shutterOuter: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    borderWidth: 5,
+    borderColor: "white",
+    justifyContent: "center",
+    alignItems: "center",
+  },
 
-    shutterInner: {
-        width: 64,
-        height: 64,
-        borderRadius: 32,
-        backgroundColor: "white",
-    },
+  shutterInner: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: "white",
+  },
 
-    shutterDisabled: {
-        opacity: 0.5,
-    },
+  shutterDisabled: {
+    opacity: 0.5,
+  },
 
-    sideControlDisabled: {
-        opacity: 0.4,
-    },
+  sideControlDisabled: {
+    opacity: 0.4,
+  },
 
-    sideButton: {
-        width: 55,
-        height: 55,
-        justifyContent: "center",
-        alignItems: "center",
-    },
+  sideButton: {
+    width: 55,
+    height: 55,
+    justifyContent: "center",
+    alignItems: "center",
+  },
 
-    flipText: {
-        color: "white",
-        fontSize: 40,
-    },
+  flipText: {
+    color: "white",
+    fontSize: 40,
+  },
 
-    permissionContainer: {
-        backgroundColor: "black",
-        flex: 1,
-        justifyContent: "center",
-        alignItems: "center",
-        padding: 20,
-    },
+  permissionContainer: {
+    backgroundColor: "black",
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
 
-    permissionText: {
-        color: "white",
-        fontSize: 16,
-        marginBottom: 20,
-    },
+  permissionText: {
+    color: "white",
+    fontSize: 16,
+    marginBottom: 20,
+  },
 
-    permissionButton: {
-        paddingHorizontal: 20,
-        paddingVertical: 12,
-        borderRadius: 8,
-        backgroundColor: "black",
-    },
+  permissionButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: "black",
+  },
 
-    permissionButtonText: {
-        color: "white",
-        fontSize: 16,
-    },
+  permissionButtonText: {
+    color: "white",
+    fontSize: 16,
+  },
 
-    voiceButton: {
-        width: 60,
-        height: 60,
-        borderRadius: 30,
-        backgroundColor: "rgba(0, 0, 0, 0.5)",
-        alignItems: "center",
-        justifyContent: "center",
-        position: "absolute",
-        bottom: 52,
-        left: 35,
-        zIndex: 4,
-    },
+  voiceButton: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    alignItems: "center",
+    justifyContent: "center",
+    position: "absolute",
+    bottom: 52,
+    left: 35,
+    zIndex: 4,
+  },
 
-    voiceButtonText: {
-        color: "#FF4248",
-        fontSize: 12,
-        fontWeight: "bold",
-    },
+  voiceButtonText: {
+    color: "#FF4248",
+    fontSize: 12,
+    fontWeight: "bold",
+  },
 
-    topBlackBar: {
-        position: "absolute",
-        top: 0,
-        left: 0,
-        right: 0,
-        height: 120,
-        backgroundColor: "black",
-        zIndex: 2,
-    },
+  topBlackBar: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 120,
+    backgroundColor: "black",
+    zIndex: 2,
+  },
 
-    settingsButton: {
-        position: "absolute",
-        right: 18,
-        zIndex: 6,
-    },
+  settingsButton: {
+    position: "absolute",
+    right: 18,
+    zIndex: 6,
+  },
 
-    bottomBlackBar: {
-        position: "absolute",
-        bottom: 0,
-        left: 0,
-        right: 0,
-        height: 190,
-        backgroundColor: "black",
-        zIndex: 2,
-    },
+  bottomBlackBar: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 190,
+    backgroundColor: "black",
+    zIndex: 2,
+  },
 });
